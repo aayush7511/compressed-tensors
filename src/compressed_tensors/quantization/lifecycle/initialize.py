@@ -87,8 +87,6 @@ def initialize_module_for_quantization(
         with disable_onloading():
             weight = module.weight
         weight_shape, weight_dtype = weight.shape, weight.dtype
-        # Keep qparams on the same device as the weight under per-layer onloading.
-        weight_device = weight.device
 
         if scheme.input_activations is not None:
             initialize_qparams(
@@ -98,7 +96,6 @@ def initialize_module_for_quantization(
                 observed_shape=weight_shape[-1:],
                 observed_dtype=weight_dtype,
                 force_zero_point=force_zero_point,
-                device=weight_device,
             )
 
         if scheme.weights is not None:
@@ -109,7 +106,6 @@ def initialize_module_for_quantization(
                 observed_shape=weight_shape,
                 observed_dtype=weight_dtype,
                 force_zero_point=force_zero_point,
-                device=weight_device,
             )
 
         if scheme.output_activations is not None:
@@ -120,7 +116,6 @@ def initialize_module_for_quantization(
                 observed_shape=weight_shape[:-1],
                 observed_dtype=weight_dtype,
                 force_zero_point=force_zero_point,
-                device=weight_device,
             )
 
         # CompressedLinear has its own forward method that handles decompression
@@ -178,7 +173,6 @@ def initialize_qparams(
     observed_shape: tuple[int | None, ...],
     observed_dtype: torch.dtype,
     force_zero_point: bool = True,
-    device: torch.device | None = None,
 ):
     """
     Initialize quantization parameters for a given basename according to the passed
@@ -194,13 +188,15 @@ def initialize_qparams(
     :param observed_shape: last (right-most) known dimensions of the observed weight/act
     :param observed_dtype: dtype of the observed weight/actt
     :param force_zero_point: force the zero_point parameter to be initialized
-    :param device: device to allocate qparams on. Defaults to the module's execution
-        device (`get_execution_device`).
     """
     strategy = quantization_args.strategy
     dynamic = quantization_args.dynamic
     # avoid performing intialization ops on cpu
-    device = device if device is not None else get_execution_device(module)
+    if isinstance(module, (torch.nn.Linear, torch.nn.Embedding)):
+        with disable_onloading():
+            device = module.weight.device
+    else:
+        device = get_execution_device(module)
 
     # Skip all intialization for fully dynamic quantization
     if dynamic is True:
